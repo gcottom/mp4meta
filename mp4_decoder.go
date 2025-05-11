@@ -27,8 +27,9 @@ func ReadMP4(reader io.ReadSeeker) (*MP4Tag, error) {
 			field = atomsMap[ptyp]
 			return h.Expand()
 		case mp4lib.BoxTypeData():
-			ib, _, err := h.ReadPayload()
-			if err != nil {
+			ib, n, err := h.ReadPayload()
+			valueSize := n - 8
+			if err != nil || valueSize < 1 {
 				return nil, err
 			}
 			data := ib.(*mp4lib.Data)
@@ -54,7 +55,23 @@ func ReadMP4(reader io.ReadSeeker) (*MP4Tag, error) {
 				tptr.Field(fNum).SetInt(int64(num))
 				return nil, nil
 			case mp4lib.BoxType{'t', 'm', 'p', 'o'}:
-				tag.BPM = getInt(data.Data[:2])
+				// Win7 Explorer for BPM<256 write int8u:
+				// | | | | BeatsPerMinute = 120
+				// | | | | - Tag 'tmpo', Type='data', Flags=0x15 (signed int), Lang=0x0000 (1 bytes, int8u):
+				// | | | | 29a00e84: 78
+				// mp3tag write always int16u:                                           [x]
+				// | | | | BeatsPerMinute = 120
+				// | | | | - Tag 'tmpo', Type='data', Flags=0x15 (signed int), Lang=0x0000 (2 bytes, int16u):
+				// | | | |    334f8: 00 78                                           [.x]
+				tag.BPM = getInt(data.Data[:valueSize])
+				return nil, nil
+			case mp4lib.BoxType{'g', 'n', 'r', 'e'}:
+				// | | | | Genre = !
+				// | | | | - Tag 'gnre', Type='data', Flags=0x0 (undef), Lang=0x0000 (2 bytes, undef):
+				// | | | | 29a00e9d: 00 21                                           [.!]
+				if tag.Genre == "" { // give priority to (c)gen
+					tag.Genre = Id3v1GenreStr[getInt(data.Data[:valueSize])-1]
+				}
 				return nil, nil
 			case mp4lib.BoxType{'c', 'o', 'v', 'r'}:
 				img, _, err := image.Decode(bytes.NewReader(data.Data))
