@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	core "github.com/gcottom/audiometa-core"
-	"github.com/gcottom/audiometa-core/contracttest"
+	core "github.com/gcottom/audiometa-core/v2"
+	"github.com/gcottom/audiometa-core/v2/contracttest"
 )
 
 var _ map[MP4Tag]struct{}

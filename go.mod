@@ -1,11 +1,11 @@
-module github.com/gcottom/mp4meta
+module github.com/gcottom/mp4meta/v2
 
 go 1.18
 
 require (
 	github.com/abema/go-mp4 v1.3.0
 	github.com/aler9/writerseeker v1.1.0
-	github.com/gcottom/audiometa-core v0.1.0
+	github.com/gcottom/audiometa-core/v2 v2.0.0
 	github.com/stretchr/testify v1.10.0
 	github.com/sunfish-shogi/bufseekio v0.1.0
 )

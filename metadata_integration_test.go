@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"testing"
 
-	core "github.com/gcottom/audiometa-core"
+	core "github.com/gcottom/audiometa-core/v2"
 )
 
 func TestCanonicalMP4IndependentInteroperability(t *testing.T) {

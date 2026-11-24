@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	core "github.com/gcottom/audiometa-core"
+	core "github.com/gcottom/audiometa-core/v2"
 )
 
 func (l *mp4Layout) readExtraFields(fields map[core.Field][]core.Value) error {

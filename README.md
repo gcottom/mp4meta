@@ -10,8 +10,16 @@ when editing the metadata.
 - Read and write MP4 atoms (m4a, m4b): "artist", "albumArtist", "album", "coverArt", "comments", "composer", "copyright", "genre", 
 "title", "year", "encoder"
 - Reads and writes "trackNumber", "trackTotal", "discNumber", "discTotal" and "tempo (bpm)" tags with ease
-- Everything's built in, plug and play, with a simple interface, compatible with [audiometa v3](https://github.com/gcottom/audiometa/v3),
-for more audio formats. 
+- Use the same typed editor across formats through the AudioMeta v4 SDK. [AudioMeta v4](https://pkg.go.dev/github.com/gcottom/audiometa/v4)
+
+## Installation
+
+```sh
+go get github.com/gcottom/mp4meta/v2@v2.0.0
+```
+
+Update existing Go imports to `github.com/gcottom/mp4meta/v2`.
+`ReadMP4`, `SaveMP4`, and `MP4Tag` remain available at the v2 path.
 
 ## Acknowledgements
 - [go-mp4](https://github.com/abema/go-mp4): Abema's go-mp4 makes this library possible. They provided the low level and I made it high level,
@@ -23,13 +31,14 @@ This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for
 Parts of this project include third-party libraries under the MIT license. See [LICENSE.md](LICENSE.md) for details.
 
 ## Related Links
-[audiometa v3](https://github.com/gcottom/audiometa/v3)
+[AudioMeta v4](https://pkg.go.dev/github.com/gcottom/audiometa/v4)
 
-[mp3meta](https://github.com/gcottom/mp3meta)
+[MP3Meta v2](https://pkg.go.dev/github.com/gcottom/mp3meta/v2)
 
-[oggmeta](https://github.com/gcottom/oggmeta)
+[OggMeta v2](https://pkg.go.dev/github.com/gcottom/oggmeta/v2)
 
-[flacmeta](https://github.com/gcottom/flacmeta)
+[FLACMeta v2](https://pkg.go.dev/github.com/gcottom/flacmeta/v2)
+
 ## Example
 
 ```go
@@ -54,12 +63,13 @@ offset relocation. File writes are non-atomic.
 
 ## Canonical metadata
 
-Use `OpenMetadata` with the [AudioMeta field contract](https://github.com/gcottom/audiometa-core)
-to access typed fields, multiple values, and custom properties independently of
-the MP4 atom layout.
+Use `OpenMetadata` with the AudioMeta field contract to access typed fields,
+multiple values, and custom properties independently of the MP4 atom layout.
+[AudioMeta Core v2](https://pkg.go.dev/github.com/gcottom/audiometa-core/v2)
 
 ```go
-// Import github.com/gcottom/audiometa-core as core.
+// Import github.com/gcottom/audiometa-core/v2 as core.
+// Import github.com/gcottom/mp4meta/v2 as mp4meta.
 metadata, err := mp4meta.OpenMetadata(input)
 if err != nil {
     return err

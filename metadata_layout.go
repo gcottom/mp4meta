@@ -10,7 +10,7 @@ import (
 	"os"
 	"sort"
 
-	core "github.com/gcottom/audiometa-core"
+	core "github.com/gcottom/audiometa-core/v2"
 )
 
 const (

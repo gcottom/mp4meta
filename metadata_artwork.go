@@ -3,7 +3,7 @@ package mp4meta
 import (
 	"bytes"
 
-	core "github.com/gcottom/audiometa-core"
+	core "github.com/gcottom/audiometa-core/v2"
 )
 
 func coverMIME(code uint32) string {
