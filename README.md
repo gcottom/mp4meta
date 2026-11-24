@@ -46,11 +46,65 @@ if err := tag.Save(&output); err != nil { return err }
 return os.WriteFile("output.m4a", output.Bytes(), 0644)
 ```
 
-Read from a seekable source and keep it open through Save. Save buffers the
-entire rewritten file and is not atomic; prefer a separate output file and
-validate it before replacing the input. Save is intended for non-fragmented
-iTunes-style audio files with one movie box and one media data box; relocating
-64-bit chunk offsets is not supported. The writer replaces the item list with
-supported fields, so unsupported/private item-list data may be lost. Covers
-are encoded as PNG. Fast-start AAC/M4A is covered by a fixture that verifies
-the relocated 32-bit chunk offset and byte-identical media payload.
+Read from a seekable source and keep it open through Save. The legacy writer
+keeps untouched iTunes items and their encoded artwork. Setting a new cover
+through this API encodes it as PNG. Legacy Save buffers its output and supports
+a single movie and media box. It rejects fragmented files and 64-bit chunk
+offset relocation. File writes are non-atomic.
+
+## Canonical metadata
+
+Use `OpenMetadata` with the [AudioMeta field contract](https://github.com/gcottom/audiometa-core)
+to access typed fields, multiple values, and custom properties independently of
+the MP4 atom layout.
+
+```go
+// Import github.com/gcottom/audiometa-core as core.
+metadata, err := mp4meta.OpenMetadata(input)
+if err != nil {
+    return err
+}
+if err := metadata.SetField(core.TrackNumber, core.IntValue(7)); err != nil {
+    return err
+}
+if err := metadata.SetCustom("COLLECTION", "Favorites", "Listening queue"); err != nil {
+    return err
+}
+return metadata.Save(output)
+```
+
+- The editor writes movie-scope iTunes metadata. Untouched items retain their
+  raw bytes and relative order, including private types, localized values, and
+  repeat entries. Recognized fields use the registry's primary carriers.
+  Clearing a field removes its mapped aliases. Setting a field through its
+  primary carrier keeps conflicting aliases unless the old carrier would
+  shadow a required fallback.
+- Custom metadata and lossless extensions use `----` freeform items under
+  `io.github.gcottom.audiometa`. Other applications may display their raw values.
+  JPEG and PNG artwork use `covr` where possible. The editor also stores richer
+  picture attributes in the private value and uses them when the conventional
+  cover bytes still match. A new conventional cover supplied by another editor
+  takes precedence on reopen if the encoded artwork differs.
+- Nero chapter lists represent ordered start times and titles when those fit
+  the chapter box. The private extension preserves chapter IDs and end times.
+  QuickTime chapter tracks and multiple existing chapter lists are preserved
+  during unrelated edits. Chapter changes on those files return an error.
+- `ClearAll(true)` preserves unknown items. `ClearAll(false)` may remove unknown
+  items in the movie-scope iTunes item list. Other metadata collections,
+  playback trim, codec properties, and technical structures are preserved.
+- The editor streams media bytes and updates local 32-bit and 64-bit chunk
+  offsets when they move. It rejects fragmented edits, unsafe index
+  relocation, and adding a competing movie-scope metadata handler. The
+  iTunes item list and relocated offset tables are each limited to 64 MiB.
+  Unsupported or undecodable items remain opaque outside targeted edits.
+- Keep the seekable source open and unchanged while editing and saving.
+  Use a distinct destination. The streaming `Save` writes at the writer's
+  current position, leaves both resources open, and can leave partial output
+  after an I/O failure. Use a separate file and replace the original only
+  after success. Editors and their source readers are single-caller objects.
+
+The shared contract runs against an AAC/M4A fast-start fixture. With FFmpeg
+and FFprobe on PATH and Mutagen installed for Python, the integration test
+also checks sample-identical decoded PCM, unchanged duration and audio
+configuration, readable chapters, native and freeform values, repeated text,
+and exact JPEG cover data.

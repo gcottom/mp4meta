@@ -5,11 +5,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
 	"image/png"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 
 	mp4lib "github.com/abema/go-mp4"
@@ -32,20 +34,28 @@ type mp4WriteSeeker interface {
 }
 
 // Make new atoms and write to.
-func createAndWrite(w mp4Writer, ctx mp4lib.Context, _tags *MP4Tag) error {
+func createAndWrite(w mp4Writer, ctx mp4lib.Context, _tags *MP4Tag, fields map[mp4lib.BoxType]string) error {
 	var boxData *mp4lib.Data
 	dataCtx := ctx
 	dataCtx.UnderIlstMeta = true
-	for boxType, tagName := range atomsMap {
+	keys := make([]mp4lib.BoxType, 0, len(fields))
+	for boxType := range fields {
+		keys = append(keys, boxType)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+	for _, boxType := range keys {
+		tagName := fields[boxType]
 		switch tagName {
 		case "BPM":
 			if _tags.BPM == 0 {
 				continue
 			}
 			buf := make([]byte, 2)
-			temp := make([]byte, 2)
-			binary.BigEndian.PutUint16(temp, uint16(_tags.BPM))
-			buf = append(temp, buf...)
+			if _tags.BPM <= 32767 {
+				binary.BigEndian.PutUint16(buf, uint16(_tags.BPM))
+			} else {
+				buf = encodedUint32(uint32(_tags.BPM))
+			}
 			boxData = &mp4lib.Data{
 				DataType: mp4lib.DataTypeSignedIntBigEndian,
 				Data:     buf,
@@ -64,7 +74,9 @@ func createAndWrite(w mp4Writer, ctx mp4lib.Context, _tags *MP4Tag) error {
 			buf = append(buf, temp...)
 			binary.BigEndian.PutUint16(temp, uint16(totalVal))
 			buf = append(buf, temp...)
-			buf = append(buf, make([]byte, 2)...)
+			if tagName == "TrackNumber" {
+				buf = append(buf, 0, 0)
+			}
 			boxData = &mp4lib.Data{
 				DataType: mp4lib.DataTypeBinary,
 				Data:     buf,
@@ -130,9 +142,33 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 	var unsupportedOffsets bool
 	var stcoOffsets []int64
 	var ilstExists bool
+	layout, err := inspectMP4(r)
+	if err != nil {
+		return err
+	}
+	changed, err := legacyChanges(r, _tags)
+	if err != nil {
+		return err
+	}
+	if len(changed) != 0 && layout.hasForeign && layout.meta.header == 0 {
+		return errors.New("mp4meta: cannot add iTunes metadata alongside a foreign user data collection")
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	rs := bufseekio.NewReadSeeker(r, 1024*1024, 4)
 
-	_, err := mp4lib.ReadBoxStructure(rs, func(h *mp4lib.ReadHandle) (interface{}, error) {
+	_, err = mp4lib.ReadBoxStructure(rs, func(h *mp4lib.ReadHandle) (interface{}, error) {
+		switch h.BoxInfo.Type {
+		case mp4lib.BoxTypeMeta():
+			if int64(h.BoxInfo.Offset) != layout.meta.start || layout.meta.header == 0 {
+				return nil, w.CopyBox(r, &h.BoxInfo)
+			}
+		case mp4lib.BoxTypeIlst():
+			if int64(h.BoxInfo.Offset) != layout.ilst.start || layout.ilst.header == 0 {
+				return nil, w.CopyBox(r, &h.BoxInfo)
+			}
+		}
 		switch h.BoxInfo.Type {
 		case mp4lib.BoxTypeMoof():
 			return nil, errors.New("mp4meta: fragmented MP4 is not supported")
@@ -175,7 +211,7 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 				}
 			}
 			// 1-a. [only moov box] add udta box if not exists
-			if h.BoxInfo.Type == mp4lib.BoxTypeMoov() && !ilstExists {
+			if h.BoxInfo.Type == mp4lib.BoxTypeMoov() && !ilstExists && len(changed) != 0 {
 				path := []mp4lib.BoxType{mp4lib.BoxTypeUdta(), mp4lib.BoxTypeMeta()}
 				for _, boxType := range path {
 					if _, err := w.StartBox(&mp4lib.BoxInfo{Type: boxType}); err != nil {
@@ -203,7 +239,7 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 					return nil, err
 				}
 				ctx.UnderIlst = true
-				if err := createAndWrite(w, ctx, _tags); err != nil {
+				if err := createAndWrite(w, ctx, _tags, changed); err != nil {
 					return nil, err
 				}
 				if _, err := w.EndBox(); err != nil {
@@ -219,8 +255,25 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 			if h.BoxInfo.Type == mp4lib.BoxTypeIlst() {
 				ctx := h.BoxInfo.Context
 				ctx.UnderIlst = true
-				if err := createAndWrite(w, ctx, _tags); err != nil {
+				var tail *mp4lib.BoxInfo
+				for _, item := range layout.items {
+					itemBox := itemInfo(item.box)
+					if _, modified := changed[itemBox.Type]; modified {
+						continue
+					}
+					if item.box.extendsTail {
+						tail = itemBox
+					} else if err := w.CopyBox(r, itemBox); err != nil {
+						return nil, err
+					}
+				}
+				if err := createAndWrite(w, ctx, _tags, changed); err != nil {
 					return nil, err
+				}
+				if tail != nil {
+					if err := w.CopyBox(r, tail); err != nil {
+						return nil, err
+					}
 				}
 				ilstExists = true
 			}
@@ -263,6 +316,11 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 	}
 	if unsupportedOffsets && mdatOffsetDiff != 0 {
 		return errors.New("mp4meta: cannot relocate co64 offsets")
+	}
+	if delta := int64(len(ws.Bytes())) - layout.size; delta != 0 {
+		if _, err := layout.relocateChunks(nil, layout.moov.end, delta); err != nil {
+			return err
+		}
 	}
 	ts := bufseekio.NewReadSeeker(bytes.NewReader(ws.Bytes()), 1024*1024, 3)
 
@@ -356,4 +414,56 @@ func SaveMP4(r io.ReadSeeker, wo io.Writer, _tags *MP4Tag) error {
 	defer ws.Close()
 	w := mp4lib.NewWriter(ws)
 	return saveMP4(r, wo, w, ws, _tags)
+}
+
+func itemInfo(b boxRange) *mp4lib.BoxInfo {
+	result := &mp4lib.BoxInfo{Offset: uint64(b.start), Size: uint64(b.size()), HeaderSize: uint64(b.header), ExtendToEOF: b.extendsTail}
+	copy(result.Type[:], b.kind)
+	return result
+}
+
+// legacyChanges recognizes direct edits to exported fields as well as setter
+// calls. Raw artwork is retained when the decoded pixels have not changed.
+func legacyChanges(source io.ReadSeeker, edited *MP4Tag) (map[mp4lib.BoxType]string, error) {
+	if edited.original == nil || edited.cleared || !sameReader(source, edited.reader) {
+		return atomsMap, nil
+	}
+	current, before := reflect.ValueOf(edited).Elem(), reflect.ValueOf(edited.original).Elem()
+	changed := make(map[mp4lib.BoxType]string)
+	for key, name := range atomsMap {
+		switch name {
+		case "CoverArt":
+			if edited.CoverArt == nil {
+				if edited.original.CoverArt == nil {
+					continue
+				}
+			} else if edited.originalCover != nil {
+				decoded, _, err := image.Decode(bytes.NewReader(*edited.originalCover))
+				if err != nil {
+					return nil, err
+				}
+				if reflect.DeepEqual(decoded, *edited.CoverArt) {
+					continue
+				}
+			}
+		case "TrackNumber", "DiscNumber":
+			total := strings.ReplaceAll(name, "Number", "Total")
+			if current.FieldByName(name).Int() == before.FieldByName(name).Int() &&
+				current.FieldByName(total).Int() == before.FieldByName(total).Int() {
+				continue
+			}
+		default:
+			if current.FieldByName(name).Interface() == before.FieldByName(name).Interface() {
+				continue
+			}
+		}
+		changed[key] = name
+	}
+	return changed, nil
+}
+
+func sameReader(a, b io.ReadSeeker) bool {
+	left, right := reflect.ValueOf(a), reflect.ValueOf(b)
+	return left.IsValid() && right.IsValid() && left.Type() == right.Type() &&
+		left.Kind() == reflect.Ptr && left.Pointer() == right.Pointer()
 }

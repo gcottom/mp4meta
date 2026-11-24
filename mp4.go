@@ -45,10 +45,15 @@ type MP4Tag struct {
 	DiscTotal   int
 	Year        string
 
-	reader io.ReadSeeker
+	reader        io.ReadSeeker
+	original      *MP4Tag
+	originalCover *[]byte
+	cleared       bool
 }
 
+// ClearAllTags clears the fields exposed by the legacy MP4 API.
 func (m *MP4Tag) ClearAllTags() {
+	m.cleared = true
 	m.Album = ""
 	m.AlbumArtist = ""
 	m.Artist = ""
