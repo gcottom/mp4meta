@@ -26,6 +26,7 @@ var atomsMap = map[mp4lib.BoxType]string{
 	{'t', 'm', 'p', 'o'}:    "BPM", //bigEndianUin:"BPM":
 }
 
+// MP4Tag holds supported iTunes-style metadata and retains its input for Save.
 type MP4Tag struct {
 	Album       string
 	AlbumArtist string
@@ -183,6 +184,7 @@ func (m *MP4Tag) SetYear(year int) {
 	m.Year = fmt.Sprint(year)
 }
 
+// Save rewrites the source into w. The source must stay open until Save returns.
 func (m *MP4Tag) Save(w io.Writer) error {
 	return SaveMP4(m.reader, w, m)
 }

@@ -3,6 +3,8 @@ package mp4meta
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"image/png"
 	"io"
 	"os"
@@ -77,7 +79,7 @@ func createAndWrite(w mp4Writer, ctx mp4lib.Context, _tags *MP4Tag) error {
 				return err
 			}
 			boxData = &mp4lib.Data{
-				DataType: 13,
+				DataType: 14, // iTunes artwork data type for PNG
 				Data:     buf.Bytes(),
 			}
 
@@ -123,12 +125,23 @@ func containsAtom(boxType mp4lib.BoxType) mp4lib.BoxType {
 
 func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tags *MP4Tag) error {
 	var mdatOffsetDiff int64
+	var mdatCount int
+	var moovCount int
+	var unsupportedOffsets bool
 	var stcoOffsets []int64
 	var ilstExists bool
 	rs := bufseekio.NewReadSeeker(r, 1024*1024, 4)
 
 	_, err := mp4lib.ReadBoxStructure(rs, func(h *mp4lib.ReadHandle) (interface{}, error) {
 		switch h.BoxInfo.Type {
+		case mp4lib.BoxTypeMoof():
+			return nil, errors.New("mp4meta: fragmented MP4 is not supported")
+		case mp4lib.BoxTypeCo64():
+			unsupportedOffsets = true
+			if err := w.CopyBox(r, &h.BoxInfo); err != nil {
+				return nil, err
+			}
+			return nil, nil
 		// 1. moov, trak, mdia, minf, stbl, udta
 		case mp4lib.BoxTypeMoov(),
 			mp4lib.BoxTypeTrak(),
@@ -138,9 +151,23 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 			mp4lib.BoxTypeUdta(),
 			mp4lib.BoxTypeMeta(),
 			mp4lib.BoxTypeIlst():
+			if h.BoxInfo.Type == mp4lib.BoxTypeMoov() {
+				moovCount++
+			}
 			_, err := w.StartBox(&h.BoxInfo)
 			if err != nil {
 				return nil, err
+			}
+			if h.BoxInfo.Type == mp4lib.BoxTypeMeta() {
+				meta, n, err := h.ReadPayload()
+				if err != nil {
+					return nil, err
+				}
+				if n != 0 {
+					if _, err := mp4lib.Marshal(w, meta, h.BoxInfo.Context); err != nil {
+						return nil, err
+					}
+				}
 			}
 			if h.BoxInfo.Type != mp4lib.BoxTypeIlst() {
 				if _, err := h.Expand(); err != nil {
@@ -157,6 +184,9 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 				}
 				ctx := h.BoxInfo.Context
 				ctx.UnderUdta = true
+				if _, err := mp4lib.Marshal(w, &mp4lib.Meta{}, ctx); err != nil {
+					return nil, err
+				}
 				if _, err := w.StartBox(&mp4lib.BoxInfo{Type: mp4lib.BoxTypeHdlr()}); err != nil {
 					return nil, err
 				}
@@ -201,13 +231,20 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 		default:
 			// 2-a. [only stco box] keep offset
 			if h.BoxInfo.Type == mp4lib.BoxTypeStco() {
-				offset, _ := w.Seek(0, io.SeekCurrent)
+				offset, err := w.Seek(0, io.SeekCurrent)
+				if err != nil {
+					return nil, err
+				}
 				stcoOffsets = append(stcoOffsets, offset)
 			}
 			// 2-b. [only mdat box] keep difference of offsets
 			if h.BoxInfo.Type == mp4lib.BoxTypeMdat() {
 				iOffset := int64(h.BoxInfo.Offset)
-				oOffset, _ := w.Seek(0, io.SeekCurrent)
+				mdatCount++
+				oOffset, err := w.Seek(0, io.SeekCurrent)
+				if err != nil {
+					return nil, err
+				}
 				mdatOffsetDiff = oOffset - iOffset
 			}
 			// copy box without modification
@@ -221,6 +258,12 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 		return err
 	}
 
+	if moovCount != 1 || mdatCount != 1 {
+		return errors.New("mp4meta: expected exactly one moov and one mdat box")
+	}
+	if unsupportedOffsets && mdatOffsetDiff != 0 {
+		return errors.New("mp4meta: cannot relocate co64 offsets")
+	}
 	ts := bufseekio.NewReadSeeker(bytes.NewReader(ws.Bytes()), 1024*1024, 3)
 
 	if _, err = ws.Seek(0, io.SeekStart); err != nil {
@@ -246,7 +289,11 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 			}
 			// update chunk offsets
 			for i := range stco.ChunkOffset {
-				stco.ChunkOffset[i] += uint32(mdatOffsetDiff)
+				next := int64(stco.ChunkOffset[i]) + mdatOffsetDiff
+				if next < 0 || next > int64(^uint32(0)) {
+					return errors.New("mp4meta: chunk offset is out of range")
+				}
+				stco.ChunkOffset[i] = uint32(next)
 			}
 			// seek to stco box payload
 			_, err = bi.SeekToPayload(ws)
@@ -281,14 +328,30 @@ func saveMP4(r io.ReadSeeker, wo io.Writer, w mp4Writer, ws mp4WriteSeeker, _tag
 		}
 		return nil
 	}
-	if _, err := wo.Write(ws.Bytes()); err != nil {
-		return err
-	}
-	return nil
+	_, err = io.Copy(wo, bytes.NewReader(ws.Bytes()))
+	return err
 
 }
 
+// SaveMP4 rewrites supported metadata in a non-fragmented MP4. It buffers the result before writing.
 func SaveMP4(r io.ReadSeeker, wo io.Writer, _tags *MP4Tag) error {
+	if r == nil || wo == nil || _tags == nil {
+		return errors.New("mp4meta: source, destination and tags are required")
+	}
+	for _, item := range []struct {
+		name  string
+		value int
+	}{{"BPM", _tags.BPM}, {"track number", _tags.TrackNumber}, {"track total", _tags.TrackTotal}, {"disc number", _tags.DiscNumber}, {"disc total", _tags.DiscTotal}} {
+		if item.value < 0 || item.value > 65535 {
+			return fmt.Errorf("mp4meta: %s must be between 0 and 65535", item.name)
+		}
+	}
+	if _tags.CoverArt != nil && *_tags.CoverArt == nil {
+		return errors.New("mp4meta: nil cover image")
+	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	ws := &writerseeker.WriterSeeker{}
 	defer ws.Close()
 	w := mp4lib.NewWriter(ws)

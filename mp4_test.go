@@ -113,15 +113,12 @@ func TestM4A(t *testing.T) {
 	})
 
 	t.Run("TestWriteEmptyTagsM4A-file", func(t *testing.T) {
-		err := os.Mkdir("./testdata/temp", 0755)
-		if err != nil {
-			assert.EqualError(t, err, "mkdir ./testdata/temp: file exists")
-		}
+		dir := t.TempDir()
 		of, err := os.ReadFile("./testdata/testdata-m4a-nonEmpty.m4a")
 		assert.NoError(t, err)
-		err = os.WriteFile("./testdata/temp/testdata-m4a-nonEmpty.m4a", of, 0755)
+		err = os.WriteFile(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"), of, 0755)
 		assert.NoError(t, err)
-		path, _ := filepath.Abs("./testdata/temp/testdata-m4a-nonEmpty.m4a")
+		path, _ := filepath.Abs(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"))
 		f, err := os.OpenFile(path, os.O_RDONLY, 0755)
 		assert.NoError(t, err)
 		defer f.Close()
@@ -135,8 +132,6 @@ func TestM4A(t *testing.T) {
 		tag, err = ReadMP4(f)
 		assert.NoError(t, err)
 		f.Close()
-		err = os.RemoveAll("./testdata/temp")
-		assert.NoError(t, err)
 		assert.Empty(t, tag.GetArtist())
 		assert.Empty(t, tag.GetAlbum())
 		assert.Empty(t, tag.GetTitle())
@@ -199,15 +194,12 @@ func TestM4A(t *testing.T) {
 	})
 
 	t.Run("TestWriteTagsM4AFromEmpty-file", func(t *testing.T) {
-		err := os.Mkdir("./testdata/temp", 0755)
-		if err != nil {
-			assert.EqualError(t, err, "mkdir ./testdata/temp: file exists")
-		}
+		dir := t.TempDir()
 		of, err := os.ReadFile("./testdata/testdata-m4a-nonEmpty.m4a")
 		assert.NoError(t, err)
-		err = os.WriteFile("./testdata/temp/testdata-m4a-nonEmpty.m4a", of, 0755)
+		err = os.WriteFile(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"), of, 0755)
 		assert.NoError(t, err)
-		path, _ := filepath.Abs("./testdata/temp/testdata-m4a-nonEmpty.m4a")
+		path, _ := filepath.Abs(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"))
 		f, err := os.Open(path)
 		assert.NoError(t, err)
 		defer f.Close()
@@ -232,8 +224,6 @@ func TestM4A(t *testing.T) {
 		_, err = f.Seek(0, io.SeekStart)
 		assert.NoError(t, err)
 		tag, err = ReadMP4(f)
-		assert.NoError(t, err)
-		err = os.RemoveAll("./testdata/temp")
 		assert.NoError(t, err)
 		assert.Equal(t, tag.GetArtist(), "TestArtist1")
 		assert.Equal(t, tag.GetAlbum(), "TestAlbum1")
@@ -308,15 +298,12 @@ func TestM4A(t *testing.T) {
 	})
 
 	t.Run("TestUpdateTagsM4A-file", func(t *testing.T) {
-		err := os.Mkdir("./testdata/temp", 0755)
-		if err != nil {
-			assert.EqualError(t, err, "mkdir ./testdata/temp: file exists")
-		}
+		dir := t.TempDir()
 		of, err := os.ReadFile("./testdata/testdata-m4a-nonEmpty.m4a")
 		assert.NoError(t, err)
-		err = os.WriteFile("./testdata/temp/testdata-m4a-nonEmpty.m4a", of, 0755)
+		err = os.WriteFile(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"), of, 0755)
 		assert.NoError(t, err)
-		path, _ := filepath.Abs("./testdata/temp/testdata-m4a-nonEmpty.m4a")
+		path, _ := filepath.Abs(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"))
 		f, err := os.Open(path)
 		assert.NoError(t, err)
 		defer f.Close()
@@ -354,8 +341,6 @@ func TestM4A(t *testing.T) {
 		tag, err = ReadMP4(f)
 		assert.NoError(t, err)
 		f.Close()
-		err = os.RemoveAll("./testdata/temp")
-		assert.NoError(t, err)
 		assert.Equal(t, tag.GetArtist(), "TestArtist2")
 		assert.Equal(t, tag.GetAlbum(), "TestAlbum1")
 		assert.Equal(t, tag.GetTitle(), "TestTitle1")
@@ -367,15 +352,12 @@ func TestM4A(t *testing.T) {
 
 	})
 	t.Run("TestNoChangeM4A-file", func(t *testing.T) {
-		err := os.Mkdir("./testdata/temp", 0755)
-		if err != nil {
-			assert.EqualError(t, err, "mkdir ./testdata/temp: file exists")
-		}
+		dir := t.TempDir()
 		of, err := os.ReadFile("./testdata/test1.m4a")
 		assert.NoError(t, err)
-		err = os.WriteFile("./testdata/temp/test1.m4a", of, 0755)
+		err = os.WriteFile(filepath.Join(dir, "test1.m4a"), of, 0755)
 		assert.NoError(t, err)
-		path, _ := filepath.Abs("./testdata/temp/test1.m4a")
+		path, _ := filepath.Abs(filepath.Join(dir, "test1.m4a"))
 		f, err := os.Open(path)
 		assert.NoError(t, err)
 		defer f.Close()
@@ -389,23 +371,18 @@ func TestM4A(t *testing.T) {
 		assert.NoError(t, err)
 		tag, err = ReadMP4(f)
 		assert.NoError(t, err)
-		err = os.RemoveAll("./testdata/temp")
-		assert.NoError(t, err)
 		assert.Equal(t, tag.GetArtist(), "test1")
 		assert.Equal(t, tag.GetAlbum(), "test1")
 		assert.Equal(t, tag.GetTitle(), "test1")
 	})
 
 	t.Run("TestWriteAllTagsM4AFromEmpty-file", func(t *testing.T) {
-		err := os.Mkdir("./testdata/temp", 0755)
-		if err != nil {
-			assert.EqualError(t, err, "mkdir ./testdata/temp: file exists")
-		}
+		dir := t.TempDir()
 		of, err := os.ReadFile("./testdata/testdata-m4a-nonEmpty.m4a")
 		assert.NoError(t, err)
-		err = os.WriteFile("./testdata/temp/testdata-m4a-nonEmpty.m4a", of, 0755)
+		err = os.WriteFile(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"), of, 0755)
 		assert.NoError(t, err)
-		path, _ := filepath.Abs("./testdata/temp/testdata-m4a-nonEmpty.m4a")
+		path, _ := filepath.Abs(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"))
 		f, err := os.Open(path)
 		assert.NoError(t, err)
 		defer f.Close()
@@ -442,8 +419,6 @@ func TestM4A(t *testing.T) {
 		assert.NoError(t, err)
 		tag, err = ReadMP4(f)
 		assert.NoError(t, err)
-		err = os.RemoveAll("./testdata/temp")
-		assert.NoError(t, err)
 		assert.Equal(t, tag.GetArtist(), "TestArtist1")
 		assert.Equal(t, tag.GetAlbum(), "TestAlbum1")
 		assert.Equal(t, tag.GetTitle(), "TestTitle1")
@@ -467,15 +442,12 @@ func TestM4A(t *testing.T) {
 }
 
 func TestSaveMP4WriterErrors(t *testing.T) {
-	err := os.Mkdir("./testdata/temp", 0755)
-	if err != nil {
-		assert.EqualError(t, err, "mkdir ./testdata/temp: file exists")
-	}
+	dir := t.TempDir()
 	of, err := os.ReadFile("./testdata/testdata-m4a-nonEmpty.m4a")
 	assert.NoError(t, err)
-	err = os.WriteFile("./testdata/temp/testdata-m4a-nonEmpty.m4a", of, 0755)
+	err = os.WriteFile(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"), of, 0755)
 	assert.NoError(t, err)
-	path, _ := filepath.Abs("./testdata/temp/testdata-m4a-nonEmpty.m4a")
+	path, _ := filepath.Abs(filepath.Join(dir, "testdata-m4a-nonEmpty.m4a"))
 	f, err := os.Open(path)
 	assert.NoError(t, err)
 	defer f.Close()

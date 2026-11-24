@@ -18,9 +18,9 @@ for more audio formats.
 for m4a, and m4b. With this combination, we can write meta tags with ease. 
 
 ## License
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
 
-Parts of this project include third-party libraries under the MIT license. See the LICENSE file for details.
+Parts of this project include third-party libraries under the MIT license. See [LICENSE.md](LICENSE.md) for details.
 
 ## Related Links
 [audiometa v3](https://github.com/gcottom/audiometa/v3)
@@ -30,3 +30,27 @@ Parts of this project include third-party libraries under the MIT license. See t
 [oggmeta](https://github.com/gcottom/oggmeta)
 
 [flacmeta](https://github.com/gcottom/flacmeta)
+## Example
+
+```go
+in, err := os.Open("input.m4a")
+if err != nil { return err }
+defer in.Close()
+
+tag, err := mp4meta.ReadMP4(in)
+if err != nil { return err }
+tag.SetTitle("New title")
+
+var output bytes.Buffer
+if err := tag.Save(&output); err != nil { return err }
+return os.WriteFile("output.m4a", output.Bytes(), 0644)
+```
+
+Read from a seekable source and keep it open through Save. Save buffers the
+entire rewritten file and is not atomic; prefer a separate output file and
+validate it before replacing the input. Save is intended for non-fragmented
+iTunes-style audio files with one movie box and one media data box; relocating
+64-bit chunk offsets is not supported. The writer replaces the item list with
+supported fields, so unsupported/private item-list data may be lost. Covers
+are encoded as PNG. Fast-start AAC/M4A is covered by a fixture that verifies
+the relocated 32-bit chunk offset and byte-identical media payload.

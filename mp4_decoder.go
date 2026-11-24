@@ -3,7 +3,10 @@ package mp4meta
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"image"
+	_ "image/jpeg"
 	"io"
 	"reflect"
 
@@ -11,22 +14,39 @@ import (
 	"github.com/sunfish-shogi/bufseekio"
 )
 
+// ReadMP4 reads supported iTunes-style metadata from the start of a seekable MP4.
 func ReadMP4(reader io.ReadSeeker) (*MP4Tag, error) {
+	if reader == nil {
+		return nil, errors.New("mp4meta: nil source")
+	}
+	if _, err := reader.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
 	tag := new(MP4Tag)
 	tag.reader = reader
 	tptr := reflect.ValueOf(tag).Elem()
 	r := bufseekio.NewReadSeeker(reader, 1024*1024, 4)
+	var foundMovie bool
 	var ptyp mp4lib.BoxType
 	var field string
 	_, err := mp4lib.ReadBoxStructure(r, func(h *mp4lib.ReadHandle) (val interface{}, err error) {
 		switch h.BoxInfo.Type {
-		case mp4lib.BoxTypeMoov(), mp4lib.BoxTypeUdta(), mp4lib.BoxTypeMeta(), mp4lib.BoxTypeIlst():
+		case mp4lib.BoxTypeMoov():
+			foundMovie = true
+			return h.Expand()
+		case mp4lib.BoxTypeUdta(), mp4lib.BoxTypeMeta(), mp4lib.BoxTypeIlst():
 			return h.Expand()
 		case containsAtom(h.BoxInfo.Type):
 			ptyp = h.BoxInfo.Type
 			field = atomsMap[ptyp]
-			return h.Expand()
+			v, err := h.Expand()
+			ptyp = mp4lib.BoxType{}
+			field = ""
+			return v, err
 		case mp4lib.BoxTypeData():
+			if field == "" {
+				return nil, nil
+			}
 			ib, _, err := h.ReadPayload()
 			if err != nil {
 				return nil, err
@@ -34,6 +54,9 @@ func ReadMP4(reader io.ReadSeeker) (*MP4Tag, error) {
 			data := ib.(*mp4lib.Data)
 			switch ptyp {
 			case mp4lib.BoxType{'t', 'r', 'k', 'n'}, mp4lib.BoxType{'d', 'i', 's', 'k'}:
+				if len(data.Data) < 6 {
+					return nil, fmt.Errorf("mp4meta: short %s value", field)
+				}
 				var num uint16
 				if err := binary.Read(bytes.NewReader(data.Data[2:4]), binary.BigEndian, &num); err != nil {
 					return nil, err
@@ -54,6 +77,9 @@ func ReadMP4(reader io.ReadSeeker) (*MP4Tag, error) {
 				tptr.Field(fNum).SetInt(int64(num))
 				return nil, nil
 			case mp4lib.BoxType{'t', 'm', 'p', 'o'}:
+				if len(data.Data) < 2 {
+					return nil, errors.New("mp4meta: short BPM value")
+				}
 				tag.BPM = getInt(data.Data[:2])
 				return nil, nil
 			case mp4lib.BoxType{'c', 'o', 'v', 'r'}:
@@ -79,6 +105,9 @@ func ReadMP4(reader io.ReadSeeker) (*MP4Tag, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !foundMovie {
+		return nil, errors.New("mp4meta: missing moov box")
 	}
 	return tag, nil
 }
